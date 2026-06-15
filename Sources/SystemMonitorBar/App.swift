@@ -8,7 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let monitor = SystemMonitor()
     let aiMonitor = AIMonitor()
 
-    /// Whether the app is registered as a login item.
     var loginItemEnabled: Bool {
         SMAppService.mainApp.status == .enabled
     }
@@ -31,8 +30,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.action = #selector(togglePopover)
     }
 
-    // MARK: - Login Item
-
     func toggleLoginItem() {
         do {
             if loginItemEnabled {
@@ -44,8 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("SMAppService error: \(error)")
         }
     }
-
-    // MARK: - Menu Bar Title
 
     private func updateMenuBarTitle(button: NSStatusBarButton) {
         let cpu = String(format: "%.0f%%", monitor.cpuUsage)
@@ -70,12 +65,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func shortName(_ name: String) -> String {
-        if name.lowercased() == "claude code" { return "Cc" }
-        if name.lowercased() == "gpt cli" { return "GPT" }
-        return String(name.prefix(3))
+        switch name.lowercased() {
+        case "codex":       return "Cx"
+        case "claude code": return "Cc"
+        case "gpt cli":     return "GPT"
+        case "aider":       return "Aid"
+        case "windsurf":    return "Ws"
+        case "opencode":    return "Oc"
+        default:            return String(name.prefix(2))
+        }
     }
-
-    // MARK: - Popover
 
     @objc private func togglePopover() {
         guard let button = statusItem?.button else { return }
