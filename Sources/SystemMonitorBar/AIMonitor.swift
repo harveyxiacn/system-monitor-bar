@@ -29,6 +29,7 @@ final class AIMonitor: ObservableObject {
         AIToolStatus(id: "aider",    displayName: "Aider"),
         AIToolStatus(id: "windsurf", displayName: "Windsurf"),
         AIToolStatus(id: "opencode", displayName: "OpenCode"),
+        AIToolStatus(id: "antigravity", displayName: "Antigravity"),
     ]
 
     @Published var recentCompletions: [String] = []

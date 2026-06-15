@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "aider":       return "Aid"
         case "windsurf":    return "Ws"
         case "opencode":    return "Oc"
+        case "antigravity": return "AG"
         default:            return String(name.prefix(2))
         }
     }
