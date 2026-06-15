@@ -16,7 +16,7 @@ struct AIToolStatus: Identifiable {
     var status: AIStatus = .notRunning
     var pinned: Bool = false
     var pid: Int32? = nil
-    var prevCPUTicks: UInt64 = 0  // cumulative CPU ticks for delta calc
+    var prevCPUTicks: UInt64 = 0
 }
 
 // MARK: - Monitor
@@ -31,13 +31,20 @@ final class AIMonitor: ObservableObject {
         AIToolStatus(id: "opencode", displayName: "OpenCode"),
     ]
 
-    /// Recently completed tool names for menu-bar brief display.
     @Published var recentCompletions: [String] = []
 
     private var timer: Timer?
-    private let cpuThreshold: UInt64 = 50_000_000  // 50ms CPU time per 5s interval
+    private let cpuThreshold: UInt64 = 50_000_000
 
     init() {
+        // Restore pinned state from UserDefaults.
+        let pinnedKeys = UserDefaults.standard.stringArray(forKey: "AIMonitor.pinned") ?? []
+        for k in pinnedKeys {
+            if let idx = tools.firstIndex(where: { $0.id == k }) {
+                tools[idx].pinned = true
+            }
+        }
+
         Task { @MainActor in self.refresh() }
         timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -50,55 +57,55 @@ final class AIMonitor: ObservableObject {
     func togglePin(_ toolID: String) {
         guard let idx = tools.firstIndex(where: { $0.id == toolID }) else { return }
         tools[idx].pinned.toggle()
+        // Persist
+        let keys = tools.filter(\.pinned).map(\.id)
+        UserDefaults.standard.set(keys, forKey: "AIMonitor.pinned")
     }
 
-    // MARK: - Refresh cycle
+    // MARK: - Refresh
 
     @MainActor
     func refresh() {
         let snapshot = currentProcessSnapshot()
 
-        // Process currently-running tool PIDs.
         var nowRunning: Set<String> = []
         for i in tools.indices {
             let t = tools[i]
             if let info = snapshot[t.id] {
                 nowRunning.insert(t.id)
                 tools[i].pid = info.pid
-                // Determine working vs idle from CPU delta.
                 let delta = info.cpuTicks &- t.prevCPUTicks
                 tools[i].prevCPUTicks = info.cpuTicks
                 if delta > cpuThreshold {
                     tools[i].status = .working
                 } else {
-                    // If it just became idle from working, keep "working" briefly.
                     if t.status == .working {
-                        tools[i].status = .idle  // transition to idle
+                        tools[i].status = .idle
                     }
-                    // Already idle or not_running → stay/idle
-                    tools[i].status = tools[i].status == .completed ? .idle : (tools[i].status == .notRunning ? .working : tools[i].status)
+                    if tools[i].status == .notRunning {
+                        tools[i].status = .working
+                    }
                 }
             }
         }
 
-        // Handle tools that stopped running.
         for i in tools.indices {
             if !nowRunning.contains(tools[i].id) {
-                if tools[i].status == .working || tools[i].status == .idle {
+                let wasActive = tools[i].status == .working || tools[i].status == .idle
+                if wasActive {
                     tools[i].status = .completed
                     recentCompletions.append(tools[i].displayName)
-                    // Keep brief completion in recentCompletions.
+                    let name = tools[i].displayName
                     DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-                        self?.recentCompletions.removeAll { $0 == self?.tools[i].displayName }
+                        self?.recentCompletions.removeAll { $0 == name }
                     }
-                    // Transition to notRunning after brief completion display.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
                         if self?.tools[i].status == .completed {
                             self?.tools[i].status = .notRunning
                         }
                     }
                 } else if tools[i].status == .completed {
-                    // Stay completed.
+                    // stay completed
                 } else {
                     tools[i].status = .notRunning
                 }
@@ -107,7 +114,6 @@ final class AIMonitor: ObservableObject {
             }
         }
 
-        // If a tool was completed and then reappears (restarted), reset.
         for i in tools.indices {
             if nowRunning.contains(tools[i].id), tools[i].status == .completed {
                 tools[i].status = .working
@@ -131,24 +137,39 @@ final class AIMonitor: ObservableObject {
         let used = proc_listallpids(&pids, Int32(count))
         guard used > 0 else { return [:] }
 
-        var result: [String: ProcInfo] = [:]
         let monitorIDs = Set(tools.map(\.id))
+        var result: [String: ProcInfo] = [:]
 
         for i in 0..<Int(used) {
             let pid = pids[i]
+
+            // Get process name (basename of executable).
             var nameBuf = [CChar](repeating: 0, count: Int(MAXCOMLEN) + 1)
             proc_name(pid, &nameBuf, UInt32(MAXCOMLEN))
-            let name = String(cString: nameBuf).lowercased()
+            let procName = String(cString: nameBuf).lowercased()
 
-            guard monitorIDs.contains(name) else { continue }
+            // Also get full executable path for broader matching.
+            var pathBuf = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+            proc_pidpath(pid, &pathBuf, UInt32(MAXPATHLEN))
+            let procPath = String(cString: pathBuf).lowercased()
 
-            // Get CPU ticks via proc_pidinfo(PROC_PIDTASKINFO).
+            // Match: is the process name or path associated with a monitored tool?
+            var matchedID: String? = nil
+            for toolID in monitorIDs {
+                if procName.contains(toolID) || procPath.contains(toolID) {
+                    matchedID = toolID
+                    break
+                }
+            }
+            guard let matchedID else { continue }
+
+            // Get CPU ticks.
             var ti = proc_taskinfo()
             let size = Int32(MemoryLayout<proc_taskinfo>.size)
             let ret = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &ti, size)
             let cpuTicks: UInt64 = (ret > 0) ? (ti.pti_total_user &+ ti.pti_total_system) : 0
 
-            result[name] = ProcInfo(pid: pid, cpuTicks: cpuTicks)
+            result[matchedID] = ProcInfo(pid: pid, cpuTicks: cpuTicks)
         }
         return result
     }
