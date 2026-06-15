@@ -68,7 +68,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch name.lowercased() {
         case "codex":       return "Cx"
         case "claude code": return "Cc"
-        case "gpt cli":     return "GPT"
         case "aider":       return "Aid"
         case "windsurf":    return "Ws"
         case "opencode":    return "Oc"

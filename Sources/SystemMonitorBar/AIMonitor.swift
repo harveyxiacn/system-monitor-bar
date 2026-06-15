@@ -25,7 +25,6 @@ final class AIMonitor: ObservableObject {
     @Published var tools: [AIToolStatus] = [
         AIToolStatus(id: "codex",    displayName: "Codex"),
         AIToolStatus(id: "claude",   displayName: "Claude Code"),
-        AIToolStatus(id: "gpt",      displayName: "GPT CLI"),
         AIToolStatus(id: "aider",    displayName: "Aider"),
         AIToolStatus(id: "windsurf", displayName: "Windsurf"),
         AIToolStatus(id: "opencode", displayName: "OpenCode"),
