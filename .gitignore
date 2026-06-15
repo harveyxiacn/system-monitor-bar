@@ -1,0 +1,6 @@
+.build/
+SystemMonitorBar.app/
+*.o
+*.swp
+.DS_Store
+*.log
