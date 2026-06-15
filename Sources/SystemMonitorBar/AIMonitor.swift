@@ -37,7 +37,6 @@ final class AIMonitor: ObservableObject {
     private let cpuThreshold: UInt64 = 50_000_000
 
     init() {
-        // Restore pinned state from UserDefaults.
         let pinnedKeys = UserDefaults.standard.stringArray(forKey: "AIMonitor.pinned") ?? []
         for k in pinnedKeys {
             if let idx = tools.firstIndex(where: { $0.id == k }) {
@@ -51,22 +50,17 @@ final class AIMonitor: ObservableObject {
         }
     }
 
-    // MARK: - Pinning
-
     @MainActor
     func togglePin(_ toolID: String) {
         guard let idx = tools.firstIndex(where: { $0.id == toolID }) else { return }
         tools[idx].pinned.toggle()
-        // Persist
         let keys = tools.filter(\.pinned).map(\.id)
         UserDefaults.standard.set(keys, forKey: "AIMonitor.pinned")
     }
 
-    // MARK: - Refresh
-
     @MainActor
     func refresh() {
-        let snapshot = currentProcessSnapshot()
+        let snapshot = currentProcessSnapshot()  // [toolID: ProcInfo] — keeps highest-CPU PID per tool
 
         var nowRunning: Set<String> = []
         for i in tools.indices {
@@ -121,13 +115,13 @@ final class AIMonitor: ObservableObject {
         }
     }
 
-    // MARK: - Process snapshot
-
     private struct ProcInfo {
         var pid: Int32
         var cpuTicks: UInt64
     }
 
+    /// Returns one entry per monitored tool, keeping the PID with the **highest** CPU ticks
+    /// (so the main app / CLI wins over low-CPU helper processes like node_repl).
     private func currentProcessSnapshot() -> [String: ProcInfo] {
         let bufSize = proc_listallpids(nil, 0)
         guard bufSize > 0 else { return [:] }
@@ -143,17 +137,14 @@ final class AIMonitor: ObservableObject {
         for i in 0..<Int(used) {
             let pid = pids[i]
 
-            // Get process name (basename of executable).
             var nameBuf = [CChar](repeating: 0, count: Int(MAXCOMLEN) + 1)
             proc_name(pid, &nameBuf, UInt32(MAXCOMLEN))
             let procName = String(cString: nameBuf).lowercased()
 
-            // Also get full executable path for broader matching.
             var pathBuf = [CChar](repeating: 0, count: Int(MAXPATHLEN))
             proc_pidpath(pid, &pathBuf, UInt32(MAXPATHLEN))
             let procPath = String(cString: pathBuf).lowercased()
 
-            // Match: is the process name or path associated with a monitored tool?
             var matchedID: String? = nil
             for toolID in monitorIDs {
                 if procName.contains(toolID) || procPath.contains(toolID) {
@@ -163,13 +154,19 @@ final class AIMonitor: ObservableObject {
             }
             guard let matchedID else { continue }
 
-            // Get CPU ticks.
             var ti = proc_taskinfo()
             let size = Int32(MemoryLayout<proc_taskinfo>.size)
             let ret = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &ti, size)
             let cpuTicks: UInt64 = (ret > 0) ? (ti.pti_total_user &+ ti.pti_total_system) : 0
 
-            result[matchedID] = ProcInfo(pid: pid, cpuTicks: cpuTicks)
+            // Keep the PID with the highest CPU ticks for this tool.
+            if let existing = result[matchedID] {
+                if cpuTicks > existing.cpuTicks {
+                    result[matchedID] = ProcInfo(pid: pid, cpuTicks: cpuTicks)
+                }
+            } else {
+                result[matchedID] = ProcInfo(pid: pid, cpuTicks: cpuTicks)
+            }
         }
         return result
     }
