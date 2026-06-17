@@ -15,8 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        aiMonitor.refresh()
-
+        // 2s balances responsiveness with minimal CPU overhead for a menu-bar utility.
         if let button = statusItem?.button {
             Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
                 DispatchQueue.main.async {
@@ -49,19 +48,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return gb >= 10 ? String(format: "%.0fG", gb) : String(format: "%.1fG", gb)
         }()
 
-        var parts: [String] = ["\(cpu) · \(mem)"]
+        let baseFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        let result = NSMutableAttributedString()
 
-        let pinnedWorking = aiMonitor.tools.filter { $0.pinned && $0.status == .working }
-        let pinnedIdle   = aiMonitor.tools.filter { $0.pinned && $0.status == .idle }
+        result.append(NSAttributedString(
+            string: "\(cpu) · \(mem)",
+            attributes: [.font: baseFont, .foregroundColor: NSColor.labelColor]
+        ))
 
-        for t in pinnedWorking { parts.append("\(shortName(t.displayName)):⚡") }
-        for t in pinnedIdle   { parts.append("\(shortName(t.displayName)):●") }
-        let compNames = aiMonitor.recentCompletions.map { "\(shortName($0)):✓" }
-        parts.append(contentsOf: compNames)
+        let theme = ThemeManager.shared.currentTheme
 
-        let title = parts.joined(separator: " ")
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        button.attributedTitle = NSAttributedString(string: title, attributes: [.font: font])
+        func appendBadge(name: String, appearance: StatusAppearance) {
+            result.append(NSAttributedString(
+                string: " \(shortName(name)):\(appearance.menuSymbol)",
+                attributes: [.font: baseFont, .foregroundColor: appearance.color.nsColor]
+            ))
+        }
+
+        for t in aiMonitor.tools where t.pinned && t.status == .working {
+            appendBadge(name: t.displayName, appearance: theme.working)
+        }
+        for t in aiMonitor.tools where t.pinned && t.status == .idle {
+            appendBadge(name: t.displayName, appearance: theme.idle)
+        }
+        for name in aiMonitor.recentCompletions {
+            appendBadge(name: name, appearance: theme.completed)
+        }
+
+        button.attributedTitle = result
     }
 
     private func shortName(_ name: String) -> String {
@@ -92,7 +106,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 monitor: monitor,
                 aiMonitor: aiMonitor,
                 loginItemEnabled: loginItemEnabled,
-                toggleLoginItem: { [weak self] in self?.toggleLoginItem() }
+                toggleLoginItem: { [weak self] in self?.toggleLoginItem() },
+                onResize: { [weak self] size in
+                    self?.popover?.contentSize = size
+                }
             )
         )
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -106,6 +123,24 @@ private var strongDelegate: AppDelegate?
 @main
 struct MainEntry {
     static func main() {
+        // Single-instance guard: write our PID to a lock file. If another
+        // instance is already running (PID still alive), exit immediately.
+        let lockPath = NSTemporaryDirectory().appending("SystemMonitorBar.lock")
+        if let data = FileManager.default.contents(atPath: lockPath),
+           let contents = String(data: data, encoding: .utf8),
+           let existingPID = Int32(contents.trimmingCharacters(in: .whitespacesAndNewlines)),
+           existingPID != ProcessInfo.processInfo.processIdentifier {
+            // Check if the existing process is still alive
+            if kill(existingPID, 0) == 0 {
+                // Another instance is running — exit silently
+                exit(0)
+            }
+        }
+        // Write our PID (overwrite stale lock)
+        try? "\(ProcessInfo.processInfo.processIdentifier)".write(
+            toFile: lockPath, atomically: true, encoding: .utf8
+        )
+
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         let delegate = AppDelegate()

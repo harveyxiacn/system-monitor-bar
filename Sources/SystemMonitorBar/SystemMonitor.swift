@@ -78,7 +78,10 @@ final class SystemMonitor: ObservableObject {
         sysctlbyname("hw.memsize", &physMem, &size, nil, 0)
 
         let pageSize64 = UInt64(pageSize)
-        let used = (UInt64(vmStat.active_count) &+ UInt64(vmStat.wire_count)) &* pageSize64
+        // Active + Wired + Compressed pages = what's actually consuming RAM.
+        // compressor_page_count reflects pages held in RAM by the compressor;
+        // excluding inactive/cached file pages which macOS can reclaim instantly.
+        let used = (UInt64(vmStat.active_count) &+ UInt64(vmStat.wire_count) &+ UInt64(vmStat.compressor_page_count)) &* pageSize64
 
         Task { @MainActor in
             self.memoryTotal = physMem
