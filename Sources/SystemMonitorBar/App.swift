@@ -47,12 +47,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let gb = Double(monitor.memoryUsed) / 1_073_741_824.0
             return gb >= 10 ? String(format: "%.0fG", gb) : String(format: "%.1fG", gb)
         }()
+        let temp: String = {
+            guard let t = monitor.cpuTemperature else { return "" }
+            return String(format: " · %.0f°C", t)
+        }()
+        let gpuTemp: String = {
+            guard let t = monitor.gpuTemperature else { return "" }
+            return String(format: " · GPU %.0f°C", t)
+        }()
 
         let baseFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         let result = NSMutableAttributedString()
 
         result.append(NSAttributedString(
-            string: "\(cpu) · \(mem)",
+            string: "\(cpu) · \(mem)\(temp)\(gpuTemp)",
             attributes: [.font: baseFont, .foregroundColor: NSColor.labelColor]
         ))
 

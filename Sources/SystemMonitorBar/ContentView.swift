@@ -41,7 +41,11 @@ struct PopoverView: View {
                         .tint(memoryTint(fraction))
                 }
 
-                Divider().padding(.horizontal, 14)
+                // Thermals section
+                if !monitor.sensors.isEmpty {
+                    thermalsSection
+                    Divider().padding(.horizontal, 14)
+                }
 
                 // AI section
                 VStack(alignment: .leading, spacing: 4) {
@@ -113,6 +117,46 @@ struct PopoverView: View {
     }
 
     // MARK: - Helpers
+
+    @ViewBuilder
+    private var thermalsSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label("Thermals", systemImage: "thermometer.medium")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.bottom, 2)
+
+            ForEach(monitor.sensors) { sensor in
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(temperatureColor(sensor.temperature))
+                        .frame(width: 7, height: 7)
+                    Text(sensor.displayName)
+                        .font(.system(size: 12, weight: .regular))
+                    Spacer()
+                    Text(String(format: "%.1f°C", sensor.temperature))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(temperatureColor(sensor.temperature))
+                }
+                .padding(.vertical, 1)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private func temperatureColor(_ temp: Double) -> Color {
+        switch temp {
+        case ..<50:  return .blue
+        case 50..<70: return .green
+        case 70..<80: return .cyan
+        case 80..<90: return .orange
+        default:      return .red
+        }
+    }
 
     private var memoryDetail: String {
         let used = Double(monitor.memoryUsed) / 1_073_741_824.0
@@ -214,7 +258,7 @@ struct PopoverView: View {
     private func gaugeTint(_ value: Double) -> Color {
         switch value {
         case 0..<30:  return .green
-        case 30..<60: return .yellow
+        case 30..<60: return .cyan
         case 60..<85: return .orange
         default:      return .red
         }
@@ -223,7 +267,7 @@ struct PopoverView: View {
     private func memoryTint(_ fraction: Double) -> Color {
         switch fraction {
         case 0..<0.5:  return .green
-        case 0.5..<0.7: return .yellow
+        case 0.5..<0.7: return .cyan
         case 0.7..<0.85: return .orange
         default:        return .red
         }

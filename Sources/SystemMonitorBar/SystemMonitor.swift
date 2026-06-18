@@ -5,6 +5,11 @@ final class SystemMonitor: ObservableObject {
     @Published var cpuUsage: Double = 0
     @Published var memoryUsed: UInt64 = 0
     @Published var memoryTotal: UInt64 = 0
+    @Published var cpuTemperature: Double? = nil
+    @Published var gpuTemperature: Double? = nil
+    @Published var sensors: [TemperatureSensor] = []
+
+    let temperatureMonitor = TemperatureMonitor()
 
     private var previousCPUTicks: (user: UInt64, system: UInt64, idle: UInt64, nice: UInt64)?
     private var timer: Timer?
@@ -13,6 +18,10 @@ final class SystemMonitor: ObservableObject {
     init() {
         sampleCPU()
         updateMemory()
+        temperatureMonitor.update()
+        sensors = temperatureMonitor.sensors
+        cpuTemperature = temperatureMonitor.cpuTemperature
+        gpuTemperature = temperatureMonitor.gpuTemperature
         timer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
             self?.tick()
         }
@@ -21,6 +30,10 @@ final class SystemMonitor: ObservableObject {
     private func tick() {
         sampleCPU()
         updateMemory()
+        temperatureMonitor.update()
+        sensors = temperatureMonitor.sensors
+        cpuTemperature = temperatureMonitor.cpuTemperature
+        gpuTemperature = temperatureMonitor.gpuTemperature
     }
 
     // MARK: - CPU

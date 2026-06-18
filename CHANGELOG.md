@@ -5,7 +5,23 @@ All notable changes to System Monitor Bar.
 ## [Unreleased]
 
 ### Added
-- README and CHANGELOG
+- SMC-based temperature monitoring for CPU and GPU (via IOKit `AppleSMC` interface)
+- GPU temperature displayed in menu bar alongside CPU temperature
+- `TemperatureMonitor` module with `sp78`, `sp4e`, `fpe2`, and `flt` data type support
+- Diagnostic tool `diag.swift` for SMC sensor testing
+
+### Changed
+- Redesigned AI agent state machine: `working` -> `completed` -> `idle` transitions
+  - Working: process has active child processes or high CPU/context-switch activity
+  - Completed: activity dropped after working (task finished, 3s grace period)
+  - Idle: process alive but inactive for 5 seconds after completion
+- Reduced state detection latency from 60s cooldown to 3s grace + 5s completed-to-idle timer
+- Process detection now uses `kinfo_proc.p_comm` instead of `proc_name()` (broken on macOS 15)
+
+### Fixed
+- `proc_listallpids` call now passes byte count instead of PID count (was causing partial results)
+- Duplicate assignment lines in `SystemMonitor.tick()` replaced with GPU temperature propagation
+- Removed stale debug log code from AIMonitor
 
 ## [1.0.0] — 2026-06-15
 

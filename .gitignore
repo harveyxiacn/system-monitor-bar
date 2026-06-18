@@ -5,3 +5,4 @@ SystemMonitorBar.app/
 .DS_Store
 *.log
 screenshot_*.png
+diag.swift
