@@ -101,6 +101,13 @@ final class AIMonitor: ObservableObject {
         let elapsedNs = lastSampleTime.map { now.uptimeNanoseconds &- $0.uptimeNanoseconds } ?? 0
         lastSampleTime = now
 
+        // Build the parent→children index ONCE per refresh (a single process
+        // scan), shared by every hasActiveChildren() check below. Previously
+        // each running tool triggered its own full proc_listallpids scan plus
+        // recursion — O(tools × processes); this collapses it to O(processes).
+        // Skipped entirely when no monitored tool is running.
+        let childrenIndex: ChildrenIndex = snapshot.isEmpty ? [:] : buildChildrenIndex()
+
         var nowRunning: Set<String> = []
         for i in tools.indices {
             let t = tools[i]
@@ -136,7 +143,8 @@ final class AIMonitor: ObservableObject {
                 // Even I/O-waiting processes accumulate CSWs from callbacks.
                 let elapsedSec = Double(elapsedNs) / 1_000_000_000.0
                 let cswPerSec = elapsedSec > 0 ? Double(deltaCSW) / elapsedSec : 0
-                let hasChildren = hasActiveChildren(parentPID: info.pid)
+                var visitedPIDs = Set<pid_t>()
+                let hasChildren = hasActiveChildren(parentPID: info.pid, in: childrenIndex, visited: &visitedPIDs)
 
                 // State machine: idle ↔ working ↔ completed
                 //
@@ -275,40 +283,62 @@ final class AIMonitor: ObservableObject {
         "zsh", "bash", "sh", "fish", "csh", "tcsh", "ksh",
     ]
 
-    /// Checks whether a given PID has any active child processes that
-    /// indicate real work (tool calls, file I/O, bash commands).
-    /// Filters out known always-present background processes like
-    /// `caffeinate` which Claude Code spawns to prevent system sleep.
-    /// For persistent shell children (zsh, bash, etc.) kept alive by tools
-    /// like Codex CLI, recurses one level to check whether the shell itself
-    /// has active children — only then counts as "working".
-    private func hasActiveChildren(parentPID: Int32) -> Bool {
-        var pids = [pid_t](repeating: 0, count: 2048)
-        let count = Int(proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.stride)))
-        guard count > 0 else { return false }
+    /// parent PID → its direct children (pid + raw process name).
+    private typealias ChildrenIndex = [pid_t: [(pid: pid_t, name: String)]]
+
+    /// Build a parent-PID → children map in a single pass over all processes,
+    /// so the per-tool child-activity checks need no further syscalls.
+    private func buildChildrenIndex() -> ChildrenIndex {
+        var index: ChildrenIndex = [:]
+        let capacity = Int(proc_listallpids(nil, 0))
+        guard capacity > 0 else { return index }
+
+        var pids = [pid_t](repeating: 0, count: capacity)
+        let count = Int(proc_listallpids(&pids, Int32(capacity * MemoryLayout<pid_t>.stride)))
+        guard count > 0 else { return index }
 
         for i in 0..<count {
             let pid = pids[i]
-            guard pid > 0, pid != parentPID else { continue }
+            guard pid > 0 else { continue }
             var info = kinfo_proc()
             var size = MemoryLayout<kinfo_proc>.stride
             var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-            let result = sysctl(&mib, 4, &info, &size, nil, 0)
-            if result == 0 && info.kp_eproc.e_ppid == parentPID {
-                let childName = String(cString: withUnsafeBytes(of: info.kp_proc.p_comm) { $0.baseAddress!.assumingMemoryBound(to: CChar.self) })
-                if Self.ignoredChildProcessNames.contains(childName) {
-                    continue
-                }
-                if Self.shellProcessNames.contains(childName) {
-                    // Shell child: only signal "working" if the shell itself
-                    // has active children (a running command).
-                    if hasActiveChildren(parentPID: pid) {
-                        return true
-                    }
-                    continue
-                }
-                return true
+            guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { continue }
+            let ppid = info.kp_eproc.e_ppid
+            let name = String(cString: withUnsafeBytes(of: info.kp_proc.p_comm) {
+                $0.baseAddress!.assumingMemoryBound(to: CChar.self)
+            })
+            index[ppid, default: []].append((pid: pid, name: name))
+        }
+        return index
+    }
+
+    /// Whether `parentPID` has any child process that indicates real work
+    /// (tool calls, file I/O, bash commands), resolved from the prebuilt
+    /// index with no further syscalls. Always-present helpers like
+    /// `caffeinate` (spawned by Claude Code to prevent sleep) are ignored.
+    /// For persistent shell children (zsh, bash, etc.) kept alive by tools
+    /// like Codex CLI, recurses to check whether the shell itself has active
+    /// children — only then counts as "working". `visited` guards against
+    /// pathological parent/child cycles.
+    private func hasActiveChildren(parentPID: Int32, in index: ChildrenIndex, visited: inout Set<pid_t>) -> Bool {
+        guard !visited.contains(parentPID) else { return false }
+        visited.insert(parentPID)
+        guard let children = index[parentPID] else { return false }
+
+        for child in children {
+            if Self.ignoredChildProcessNames.contains(child.name) {
+                continue
             }
+            if Self.shellProcessNames.contains(child.name) {
+                // Shell child: only signal "working" if the shell itself
+                // has active children (a running command).
+                if hasActiveChildren(parentPID: child.pid, in: index, visited: &visited) {
+                    return true
+                }
+                continue
+            }
+            return true
         }
         return false
     }
