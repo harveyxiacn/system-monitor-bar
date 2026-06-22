@@ -10,6 +10,7 @@ final class SystemMonitor: ObservableObject {
     @Published var sensors: [TemperatureSensor] = []
 
     let temperatureMonitor = TemperatureMonitor()
+    private let temperatureLogger = TemperatureLogger()
 
     private var previousCPUTicks: (user: UInt64, system: UInt64, idle: UInt64, nice: UInt64)?
     private var timer: Timer?
@@ -34,6 +35,11 @@ final class SystemMonitor: ObservableObject {
         sensors = temperatureMonitor.sensors
         cpuTemperature = temperatureMonitor.cpuTemperature
         gpuTemperature = temperatureMonitor.gpuTemperature
+        temperatureLogger.record(
+            cpuUsage: cpuUsage,
+            sensors: temperatureMonitor.sensors,
+            fans: temperatureMonitor.fanSpeeds
+        )
     }
 
     // MARK: - CPU

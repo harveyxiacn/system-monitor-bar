@@ -51,6 +51,7 @@ final class TemperatureMonitor: ObservableObject {
     @Published var sensors: [TemperatureSensor] = []
     @Published var cpuTemperature: Double?
     @Published var gpuTemperature: Double?
+    @Published var fanSpeeds: [Double] = []
 
     private var connection: io_connect_t = 0
 
@@ -94,7 +95,7 @@ final class TemperatureMonitor: ObservableObject {
 
         for group in Self.sensorGroups {
             for entry in group.keys {
-                if let temp = readTemperature(key: entry.key) {
+                if let temp = readSMCValue(key: entry.key) {
                     results.append(TemperatureSensor(
                         id: entry.key,
                         group: group.group,
@@ -127,9 +128,19 @@ final class TemperatureMonitor: ObservableObject {
                 bestGPUTemp = gpuTemps.max()
             }
         }
+        // Fan RPM uses the same SMC value path (fpe2-encoded on this hardware).
+        // Most Macs expose F0Ac/F1Ac; missing keys simply return nil and are skipped.
+        var fans: [Double] = []
+        for key in ["F0Ac", "F1Ac"] {
+            if let rpm = readSMCValue(key: key) {
+                fans.append(rpm)
+            }
+        }
+
         self.sensors = results
         self.cpuTemperature = bestCPUTemp
         self.gpuTemperature = bestGPUTemp
+        self.fanSpeeds = fans
     }
 
     // MARK: - SMC Interface
@@ -155,7 +166,9 @@ final class TemperatureMonitor: ObservableObject {
         }
     }
 
-    private func readTemperature(key: String) -> Double? {
+    // Reads any numeric SMC key (temperature in °C, fan RPM, etc.) via the
+    // shared sp78/sp4e/fpe2/flt decoding. The key's own data type selects the unit.
+    private func readSMCValue(key: String) -> Double? {
         guard connection != 0 else { return nil }
 
         let smcKeyVal = smcKey(key)
