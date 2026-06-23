@@ -88,12 +88,14 @@ final class TemperatureMonitor: ObservableObject {
         closeSMC()
     }
 
-    func update() {
+    /// Samples every sensor in `groups`. Groups the user has hidden are skipped
+    /// entirely, so their SMC reads (two IOKit round-trips each) never happen.
+    func update(groups: Set<String> = Set(DisplayConfig.allSensorGroups)) {
         var results: [TemperatureSensor] = []
         var bestCPUTemp: Double?
         var bestGPUTemp: Double?
 
-        for group in Self.sensorGroups {
+        for group in Self.sensorGroups where groups.contains(group.group) {
             for entry in group.keys {
                 if let temp = readSMCValue(key: entry.key) {
                     results.append(TemperatureSensor(

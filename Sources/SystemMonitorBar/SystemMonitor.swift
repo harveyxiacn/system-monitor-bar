@@ -8,6 +8,7 @@ final class SystemMonitor: ObservableObject {
     @Published var cpuTemperature: Double? = nil
     @Published var gpuTemperature: Double? = nil
     @Published var sensors: [TemperatureSensor] = []
+    @Published var fanSpeeds: [Double] = []
 
     let temperatureMonitor = TemperatureMonitor()
     private let temperatureLogger = TemperatureLogger()
@@ -19,10 +20,7 @@ final class SystemMonitor: ObservableObject {
     init() {
         sampleCPU()
         updateMemory()
-        temperatureMonitor.update()
-        sensors = temperatureMonitor.sensors
-        cpuTemperature = temperatureMonitor.cpuTemperature
-        gpuTemperature = temperatureMonitor.gpuTemperature
+        sampleTemperatures()
         timer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
             self?.tick()
         }
@@ -31,15 +29,20 @@ final class SystemMonitor: ObservableObject {
     private func tick() {
         sampleCPU()
         updateMemory()
-        temperatureMonitor.update()
-        sensors = temperatureMonitor.sensors
-        cpuTemperature = temperatureMonitor.cpuTemperature
-        gpuTemperature = temperatureMonitor.gpuTemperature
+        sampleTemperatures()
         temperatureLogger.record(
             cpuUsage: cpuUsage,
             sensors: temperatureMonitor.sensors,
             fans: temperatureMonitor.fanSpeeds
         )
+    }
+
+    private func sampleTemperatures() {
+        temperatureMonitor.update(groups: DisplaySettings.shared.groupsToSample)
+        sensors = temperatureMonitor.sensors
+        cpuTemperature = temperatureMonitor.cpuTemperature
+        gpuTemperature = temperatureMonitor.gpuTemperature
+        fanSpeeds = temperatureMonitor.fanSpeeds
     }
 
     // MARK: - CPU

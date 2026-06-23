@@ -6,3 +6,6 @@ SystemMonitorBar.app/
 *.log
 screenshot_*.png
 diag.swift
+*.dmg
+release-notes.md
+dmg-staging/

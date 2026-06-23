@@ -108,9 +108,20 @@ final class AIMonitor: ObservableObject {
         // Skipped entirely when no monitored tool is running.
         let childrenIndex: ChildrenIndex = snapshot.isEmpty ? [:] : buildChildrenIndex()
 
+        let enabledTools = DisplaySettings.shared.config.enabledToolIDs
         var nowRunning: Set<String> = []
         for i in tools.indices {
             let t = tools[i]
+            // Tools the user disabled are not scanned or shown. Reset any leftover
+            // state so a previously-running tool clears immediately when disabled.
+            guard enabledTools.contains(t.id) else {
+                if tools[i].status != .notRunning { tools[i].status = .notRunning }
+                tools[i].pid = nil
+                tools[i].prevCPUTicks = 0
+                tools[i].prevCSW = 0
+                recentCompletions.removeAll { $0 == t.displayName }
+                continue
+            }
             if let info = snapshot[t.id] {
                 nowRunning.insert(t.id)
                 tools[i].pid = info.pid
@@ -201,6 +212,8 @@ final class AIMonitor: ObservableObject {
         }
 
         for i in tools.indices {
+            // Disabled tools were already reset above — leave them alone.
+            guard enabledTools.contains(tools[i].id) else { continue }
             if !nowRunning.contains(tools[i].id) {
                 let prevStatus = tools[i].status
                 if prevStatus == .working || prevStatus == .idle {
@@ -369,7 +382,11 @@ final class AIMonitor: ObservableObject {
         let pidCount = Int(proc_listallpids(&pids, Int32(capacity * MemoryLayout<pid_t>.stride)))
         guard pidCount > 0 else { return [:] }
 
-        let monitorIDs = Set(tools.map(\.id))
+        // Only scan for tools the user has left enabled — disabled tools are
+        // never matched, so they contribute nothing to the per-refresh scan.
+        let enabled = DisplaySettings.shared.config.enabledToolIDs
+        let monitorIDs = Set(tools.map(\.id)).intersection(enabled)
+        guard !monitorIDs.isEmpty else { return [:] }
         var result: [String: ProcInfo] = [:]
 
         for i in 0..<pidCount {

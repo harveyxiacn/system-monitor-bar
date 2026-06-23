@@ -9,11 +9,15 @@ struct PopoverView: View {
     let toggleLoginItem: () -> Void
     var onResize: ((NSSize) -> Void)?
 
+    @ObservedObject private var settings = DisplaySettings.shared
     @State private var showSettings = false
+    @State private var showDisplaySettings = false
 
     var body: some View {
         if showSettings {
             StatusSettingsView(isPresented: $showSettings, onResize: onResize)
+        } else if showDisplaySettings {
+            DisplaySettingsView(isPresented: $showDisplaySettings, aiMonitor: aiMonitor, onResize: onResize)
         } else {
             VStack(spacing: 0) {
                 // CPU section
@@ -42,7 +46,7 @@ struct PopoverView: View {
                 }
 
                 // Thermals section
-                if !monitor.sensors.isEmpty {
+                if !visibleThermals.isEmpty || showFanRows {
                     thermalsSection
                     Divider().padding(.horizontal, 14)
                 }
@@ -50,8 +54,16 @@ struct PopoverView: View {
                 // AI section
                 VStack(alignment: .leading, spacing: 4) {
                     aiSectionHeader
-                    ForEach(aiMonitor.tools.indices, id: \.self) { i in
-                        aiRow(aiMonitor.tools[i])
+                    if enabledAITools.isEmpty {
+                        Text("No AI tools enabled — turn some on in the “What to Show” settings.")
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 2)
+                    } else {
+                        ForEach(enabledAITools) { tool in
+                            aiRow(tool)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -67,15 +79,25 @@ struct PopoverView: View {
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button {
-                            showSettings = true
-                            onResize?(NSSize(width: 300, height: 580))
+                            showDisplaySettings = true
+                            onResize?(NSSize(width: 300, height: 600))
                         } label: {
-                            Image(systemName: "slider.horizontal.3")
+                            Image(systemName: "checklist")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.tertiary)
                         }
                         .buttonStyle(.plain)
-                        .help("Status Display Settings")
+                        .help("Choose what to monitor & show")
+                        Button {
+                            showSettings = true
+                            onResize?(NSSize(width: 300, height: 580))
+                        } label: {
+                            Image(systemName: "paintpalette")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Status appearance & theme")
                     }
                     .padding(.bottom, 2)
 
@@ -118,6 +140,21 @@ struct PopoverView: View {
 
     // MARK: - Helpers
 
+    /// Sensors whose group the user has left visible.
+    private var visibleThermals: [TemperatureSensor] {
+        monitor.sensors.filter { settings.config.visibleSensorGroups.contains($0.group) }
+    }
+
+    /// Whether to render fan rows in the popover.
+    private var showFanRows: Bool {
+        settings.config.showFansInPopover && !monitor.fanSpeeds.isEmpty
+    }
+
+    /// AI tools the user has left enabled.
+    private var enabledAITools: [AIToolStatus] {
+        aiMonitor.tools.filter { settings.config.enabledToolIDs.contains($0.id) }
+    }
+
     @ViewBuilder
     private var thermalsSection: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -129,7 +166,7 @@ struct PopoverView: View {
             }
             .padding(.bottom, 2)
 
-            ForEach(monitor.sensors) { sensor in
+            ForEach(visibleThermals) { sensor in
                 HStack(spacing: 8) {
                     Circle()
                         .fill(temperatureColor(sensor.temperature))
@@ -142,6 +179,24 @@ struct PopoverView: View {
                         .foregroundStyle(temperatureColor(sensor.temperature))
                 }
                 .padding(.vertical, 1)
+            }
+
+            if showFanRows {
+                ForEach(Array(monitor.fanSpeeds.enumerated()), id: \.offset) { index, rpm in
+                    HStack(spacing: 8) {
+                        Image(systemName: "fanblades")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 7)
+                        Text(monitor.fanSpeeds.count > 1 ? "Fan \(index + 1)" : "Fan")
+                            .font(.system(size: 12, weight: .regular))
+                        Spacer()
+                        Text(String(format: "%.0f RPM", rpm))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 1)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -635,5 +690,96 @@ struct EmojiPickerGrid: View {
         guard !trimmed.isEmpty else { return }
         onPick(trimmed)
         custom = ""
+    }
+}
+
+// MARK: - Display Settings View
+//
+// Lets the user choose which metrics are sampled and shown: menu-bar
+// components, popover thermal groups, and which AI tools to monitor.
+
+struct DisplaySettingsView: View {
+    @Binding var isPresented: Bool
+    @ObservedObject var aiMonitor: AIMonitor
+    var onResize: ((NSSize) -> Void)?
+
+    @ObservedObject private var settings = DisplaySettings.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                header
+
+                settingsGroup(title: "Menu Bar", systemImage: "menubar.rectangle") {
+                    Toggle("CPU usage", isOn: $settings.config.showCPU)
+                    Toggle("Memory", isOn: $settings.config.showMemory)
+                    Toggle("CPU temperature", isOn: $settings.config.showCPUTemp)
+                    Toggle("GPU temperature", isOn: $settings.config.showGPUTemp)
+                    Toggle("Fan speed", isOn: $settings.config.showFanSpeed)
+                }
+
+                settingsGroup(title: "Thermals (popover)", systemImage: "thermometer.medium") {
+                    ForEach(DisplayConfig.allSensorGroups, id: \.self) { group in
+                        Toggle(group, isOn: settings.sensorGroupBinding(group))
+                    }
+                    Toggle("Fan speeds", isOn: $settings.config.showFansInPopover)
+                }
+
+                settingsGroup(title: "AI Agents", systemImage: "brain.head.profile") {
+                    ForEach(aiMonitor.tools) { tool in
+                        Toggle(tool.displayName, isOn: settings.toolBinding(tool.id))
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .onAppear { onResize?(NSSize(width: 300, height: 600)) }
+    }
+
+    private var header: some View {
+        HStack {
+            Button {
+                isPresented = false
+                onResize?(NSSize(width: 300, height: 420))
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                    Text("Back")
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.blue)
+
+            Spacer()
+
+            Text("What to Show")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private func settingsGroup<Content: View>(
+        title: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            content()
+                .font(.system(size: 12))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.06))
+        )
     }
 }

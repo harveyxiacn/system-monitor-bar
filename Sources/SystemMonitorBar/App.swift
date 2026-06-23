@@ -42,33 +42,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateMenuBarTitle(button: NSStatusBarButton) {
-        let cpu = String(format: "%.0f%%", monitor.cpuUsage)
-        let mem: String = {
+        let cfg = DisplaySettings.shared.config
+
+        // Assemble only the components the user enabled, joined with " · ".
+        var parts: [String] = []
+        if cfg.showCPU {
+            parts.append(String(format: "%.0f%%", monitor.cpuUsage))
+        }
+        if cfg.showMemory {
             let gb = Double(monitor.memoryUsed) / 1_073_741_824.0
-            return gb >= 10 ? String(format: "%.0fG", gb) : String(format: "%.1fG", gb)
-        }()
-        let temp: String = {
-            guard let t = monitor.cpuTemperature else { return "" }
-            return String(format: " · %.0f°C", t)
-        }()
-        let gpuTemp: String = {
-            guard let t = monitor.gpuTemperature else { return "" }
-            return String(format: " · GPU %.0f°C", t)
-        }()
+            parts.append(gb >= 10 ? String(format: "%.0fG", gb) : String(format: "%.1fG", gb))
+        }
+        if cfg.showCPUTemp, let t = monitor.cpuTemperature {
+            parts.append(String(format: "%.0f°C", t))
+        }
+        if cfg.showGPUTemp, let t = monitor.gpuTemperature {
+            parts.append(String(format: "GPU %.0f°C", t))
+        }
+        if cfg.showFanSpeed, let rpm = monitor.fanSpeeds.max() {
+            parts.append(String(format: "%.0f RPM", rpm))
+        }
 
         let baseFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         let result = NSMutableAttributedString()
 
-        result.append(NSAttributedString(
-            string: "\(cpu) · \(mem)\(temp)\(gpuTemp)",
-            attributes: [.font: baseFont, .foregroundColor: NSColor.labelColor]
-        ))
+        if !parts.isEmpty {
+            result.append(NSAttributedString(
+                string: parts.joined(separator: " · "),
+                attributes: [.font: baseFont, .foregroundColor: NSColor.labelColor]
+            ))
+        }
 
         let theme = ThemeManager.shared.currentTheme
 
         func appendBadge(name: String, appearance: StatusAppearance) {
+            // Skip the leading space only when this badge is the very first thing
+            // in the bar (i.e. all numeric metrics are hidden).
+            let prefix = result.length == 0 ? "" : " "
             result.append(NSAttributedString(
-                string: " \(shortName(name)):\(appearance.menuSymbol)",
+                string: "\(prefix)\(shortName(name)):\(appearance.menuSymbol)",
                 attributes: [.font: baseFont, .foregroundColor: appearance.color.nsColor]
             ))
         }
@@ -83,7 +95,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appendBadge(name: name, appearance: theme.completed)
         }
 
-        button.attributedTitle = result
+        // If the user hid everything and no AI badge is showing, fall back to a
+        // small icon so the status item stays visible and clickable.
+        if result.length == 0 {
+            button.attributedTitle = NSAttributedString(string: "")
+            button.image = NSImage(
+                systemSymbolName: "gauge.with.dots.needle.bottom.50percent",
+                accessibilityDescription: "System Monitor"
+            )
+            button.image?.isTemplate = true
+        } else {
+            button.image = nil
+            button.attributedTitle = result
+        }
     }
 
     private func shortName(_ name: String) -> String {
