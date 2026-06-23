@@ -105,8 +105,12 @@ final class SystemMonitor: ObservableObject {
         // excluding inactive/cached file pages which macOS can reclaim instantly.
         let used = (UInt64(vmStat.active_count) &+ UInt64(vmStat.wire_count) &+ UInt64(vmStat.compressor_page_count)) &* pageSize64
 
+        // Capture immutable copies — `physMem` is a `var` only because sysctlbyname
+        // needs its address; capturing a mutable var in the @MainActor task is
+        // rejected by stricter concurrency checking.
+        let total = physMem
         Task { @MainActor in
-            self.memoryTotal = physMem
+            self.memoryTotal = total
             self.memoryUsed  = used
         }
     }

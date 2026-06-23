@@ -23,6 +23,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The sources rely on Swift 6 region-based isolation; pin the newest stable
+      # Xcode so CI matches a Swift 6 toolchain (the runner default can be older).
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: swift --version
+
       - name: Resolve version
         id: ver
         run: |

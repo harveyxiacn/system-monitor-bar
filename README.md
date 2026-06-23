@@ -18,7 +18,7 @@ A lightweight macOS menu bar app that displays real-time system metrics and trac
 ## Requirements
 
 - macOS 14 (Sonoma) or later
-- To build from source: Swift 5.9+ (Xcode or Command Line Tools)
+- To build from source: a Swift 6 toolchain (Xcode 16+ or recent Command Line Tools) — the sources rely on Swift 6 region-based isolation
 
 ## Install
 
